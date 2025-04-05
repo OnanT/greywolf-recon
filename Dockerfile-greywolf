@@ -1,0 +1,59 @@
+# Dockerfile for grey-wolf-hunt.sh
+# Author: Onan's Recon Framework
+# Banner
+#
+# "🔥🔥🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🔥🔥"
+# "================================================================"
+# "      🐺 GREY WOLF FETCH 🐺"
+# "================================================================"
+# "     // 🌙 Silent Hunter 🌙 //"
+#
+FROM kalilinux/kali-rolling:latest
+
+LABEL maintainer="Onan GreyWolf"
+
+# Update and install essentials
+RUN apt-get update && apt-get install -y \
+    git curl wget python3 python3-pip python3-venv \
+    golang sublist3r nmap nikto ffuf dirsearch \
+    chromium dnsutils jq unzip make build-essential \
+    nuclei amass \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Go tools
+ENV GOROOT=/usr/local/go
+ENV GOPATH=/root/go
+ENV PATH=$GOPATH/bin:$GOROOT/bin:$PATH
+
+# Install Go
+RUN wget https://go.dev/dl/go1.21.5.linux-amd64.tar.gz \
+    && tar -C /usr/local -xzf go1.21.5.linux-amd64.tar.gz \
+    && rm go1.21.5.linux-amd64.tar.gz
+
+# Install Go recon tools
+RUN go install github.com/tomnomnom/assetfinder@latest \
+    && go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest \
+    && go install github.com/projectdiscovery/httpx/cmd/httpx@latest \
+    && go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest \
+    && go install github.com/lc/gau/v2/cmd/gau@latest \
+    && go install github.com/hakluke/hakrawler@latest \
+    && go install github.com/projectdiscovery/katana/cmd/katana@latest \
+    && go install github.com/jaeles-project/gospider@latest \
+    && go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+
+# Install LinkFinder
+RUN git clone https://github.com/GerbenJavado/LinkFinder.git /opt/LinkFinder \
+    && pip3 install -r /opt/LinkFinder/requirements.txt \
+    && ln -s /opt/LinkFinder/linkfinder.py /usr/local/bin/LinkFinder
+
+# Install anew
+RUN go install github.com/tomnomnom/anew@latest
+
+# Add script
+COPY grey-wolf-hunt.sh /usr/local/bin/grey-wolf-hunt.sh
+RUN chmod +x /usr/local/bin/grey-wolf-hunt.sh
+
+# Create work dir
+WORKDIR /workspace
+
+ENTRYPOINT ["grey-wolf-hunt.sh"]
