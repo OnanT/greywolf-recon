@@ -1,94 +1,115 @@
 #!/bin/bash
-
-# ───────────────────────────────────────────────────────────────
-# Grey Wolf Recon Script v1.0
+# Grey Wolf Hunt Recon Script v1.2
 # Author: Onan GreyWolf
 # Purpose: Modular, concurrent recon tool for bug bounty hunting
 # Inspired by: Jason Haddix's methodology
-# ───────────────────────────────────────────────────────────────
+# Banner
+echo -e "\e[1;34m"
+echo "🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🐾🔥🔥"
+echo "================================================================"
+echo "      🐺 GREY WOLF BUG BOUNTY SETUP 🐺"
+echo "================================================================"
+echo "// 🐺 🌙 The Silent Hunter 🌙 🐺  //"
+echo -e "\e[0m"
 
-set -euo pipefail
+set -e
 
-# ──────────────── CONFIGURATION ─────────────────
-threads=10
-xargs_cmd="xargs -P $threads -I {}"
+show_help() {
+    echo "Usage: $0 [options] -d domain.com"
+    echo ""
+    echo "Options:"
+    echo "  -s    Subdomain Enumeration"
+    echo "  -l    Live Subdomain Checking"
+    echo "  -u    URL Gathering"
+    echo "  -j    JavaScript Recon"
+    echo "  -c    Content Discovery"
+    echo "  -v    Vulnerability Scanning"
+    echo "  -d    Target Domain"
+    echo "  -all  Run All Stages"
+    echo "  -h    Show Help"
+}
 
-# ──────────────── FLAGS ─────────────────
-target=""
-run_subdomains=false
-run_live=false
-run_urls=false
-run_js=false
-run_content=false
-run_vulns=false
+# Flags
+RUN_SUBS=false
+RUN_LIVE=false
+RUN_URLS=false
+RUN_JS=false
+RUN_CONTENT=false
+RUN_VULNS=false
+RUN_ALL=false
+DOMAIN=""
 
-while getopts ":sluijcvhall" opt; do
-  case $opt in
-    s) run_subdomains=true;;
-    l) run_live=true;;
-    u) run_urls=true;;
-    j) run_js=true;;
-    c) run_content=true;;
-    v) run_vulns=true;;
-    h)
-      echo "Usage: $0 [-s] [-l] [-u] [-j] [-c] [-v] domain.com"
-      exit 0;;
-    a) run_subdomains=true; run_live=true; run_content=true;;
-    :) echo "Option -$OPTARG requires an argument." >&2; exit 1;;
-    \?) echo "Invalid option: -$OPTARG" >&2; exit 1;;
-  esac
+# Parse flags
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        -s) RUN_SUBS=true;;
+        -l) RUN_LIVE=true;;
+        -u) RUN_URLS=true;;
+        -j) RUN_JS=true;;
+        -c) RUN_CONTENT=true;;
+        -v) RUN_VULNS=true;;
+        -all) RUN_ALL=true;;
+        -d) DOMAIN="$2"; shift;;
+        -h|--help) show_help; exit 0;;
+        *) echo "Unknown option: $1"; show_help; exit 1;;
+    esac
+    shift
 done
 
-shift $((OPTIND -1))
-target=$1
-if [[ -z "${target:-}" ]]; then
-  read -rp "Enter target domain: " target
+if [[ -z "$DOMAIN" ]]; then
+    echo "Enter target domain:"
+    read DOMAIN
 fi
 
-outdir="/output/$target"
-mkdir -p "$outdir"
-cd "$outdir" || exit 1
-
-# ──────────────── SUBDOMAIN ENUMERATION ─────────────────
-if $run_subdomains; then
-  echo "[+] Enumerating subdomains for $target..."
-  (assetfinder --subs-only "$target"; \
-   subfinder -d "$target" -silent; \
-   amass enum -passive -d "$target") | anew subdomains.txt
+# Default if no flags
+if ! $RUN_SUBS && ! $RUN_LIVE && ! $RUN_URLS && ! $RUN_JS && ! $RUN_CONTENT && ! $RUN_VULNS && ! $RUN_ALL; then
+    RUN_SUBS=true
+    RUN_LIVE=true
+    RUN_CONTENT=true
 fi
 
-# ──────────────── LIVE SUBDOMAINS ─────────────────
-if $run_live; then
-  echo "[+] Checking live hosts..."
-  naabu -host "$target" -silent | anew naabu.txt
-  cat subdomains.txt | $xargs_cmd httpx -silent -status-code -title -tech-detect -no-color | anew live-subdomains.txt
+OUTDIR="/home/$(whoami)/bug-bounty/$DOMAIN"
+mkdir -p "$OUTDIR"
+cd "$OUTDIR"
+
+# Subdomain Enumeration
+if $RUN_SUBS || $RUN_ALL; then
+    echo "[*] Running Subdomain Enumeration"
+    (assetfinder --subs-only "$DOMAIN"; subfinder -d "$DOMAIN" -silent; amass enum -passive -d "$DOMAIN") | anew subdomains.txt
 fi
 
-# ──────────────── URL GATHERING ─────────────────
-if $run_urls; then
-  echo "[+] Gathering URLs..."
-  (gau "$target"; katana -u "$target" -silent; hakrawler -url "$target") | anew urls.txt
+# Live Check
+if $RUN_LIVE || $RUN_ALL; then
+    echo "[*] Checking Live Hosts"
+    cat subdomains.txt | naabu -silent -p 80,443 | xargs -P10 -I{} httpx -silent -u {} | anew live-subdomains.txt
 fi
 
-# ──────────────── JS RECON ─────────────────
-if $run_js; then
-  echo "[+] Scanning JS files..."
-  grep ".js" urls.txt | sort -u | $xargs_cmd python3 /opt/LinkFinder/linkfinder.py -i {} -o cli >> js-findings.txt
+# URL Gathering
+if $RUN_URLS || $RUN_ALL; then
+    echo "[*] Gathering URLs"
+    (echo "$DOMAIN" | xargs -P10 -I{} gau {} ; echo "$DOMAIN" | xargs -P10 -I{} katana -u {}) | anew urls.txt
 fi
 
-# ──────────────── CONTENT DISCOVERY ─────────────────
-if $run_content; then
-  echo "[+] Running content discovery..."
-  ffuf -w /usr/share/seclists/Discovery/Web-Content/common.txt -u https://$target/FUZZ -of csv -o content.csv
+# JavaScript Recon
+if $RUN_JS || $RUN_ALL; then
+    echo "[*] Extracting JS Endpoints"
+    mkdir -p js
+    cat live-subdomains.txt | xargs -P10 -I{} bash -c 'curl -s {} | grep -oP "src=\\\".*?\\.js\\\"" | cut -d\" -f2' | anew js/js-urls.txt
+    cat js/js-urls.txt | xargs -P10 -I{} python3 /tools/LinkFinder/linkfinder.py -i {} -o cli >> js/js-findings.txt
 fi
 
-# ──────────────── VULNERABILITY SCANNING ─────────────────
-if $run_vulns; then
-  echo "[+] Running vulnerability scans..."
-  nuclei -l live-subdomains.txt -o nuclei.txt
-  nikto -host "$target" -output nikto.txt
-  wapiti -u "https://$target" -f txt -o wapiti.txt
+# Content Discovery
+if $RUN_CONTENT || $RUN_ALL; then
+    echo "[*] Starting Content Discovery"
+    mkdir -p content
+    cat live-subdomains.txt | xargs -P10 -I{} ffuf -w /usr/share/wordlists/dirb/common.txt -u {}/FUZZ -of csv -o content/{}/ffuf.csv || true
 fi
 
-# ──────────────── DONE ─────────────────
-echo "[+] Recon complete. Output saved in $outdir"
+# Vulnerability Scanning
+if $RUN_VULNS || $RUN_ALL; then
+    echo "[*] Starting Vulnerability Scanning"
+    mkdir -p vulns
+    cat live-subdomains.txt | xargs -P10 -I{} bash -c 'nuclei -u {} -o vulns/nuclei.txt; nikto -h {} >> vulns/nikto.txt; wapiti -u {} -o vulns/{} -f html'
+fi
+
+echo "[*] Recon complete. Output in $OUTDIR"
